@@ -1,5 +1,3 @@
-# main.py
-
 import pyomo.environ as pyo
 from collections import defaultdict, deque
 from data import *
@@ -8,13 +6,12 @@ from data import *
 # BUILD GRAPH
 # --------------------------
 graph = defaultdict(list)
-
 for s, (u, v) in switch_locations.items():
     graph[u].append((v, s))
     graph[v].append((u, s))
 
 # --------------------------
-# FIND PATH SWITCHES BETWEEN NODES
+# PATH FUNCTION
 # --------------------------
 def get_path_switches(start, end):
     visited = set()
@@ -35,18 +32,15 @@ def get_path_switches(start, end):
     return []
 
 # --------------------------
-# BUILD Sij (CRITICAL PART)
+# BUILD Sij
 # --------------------------
 Sij = {}
-
-for i in range(1, 52):  # fault at section i
+for i in range(1, 52):
     u, v = switch_locations[i]
 
     for j in nodes:
-        # take midpoint as fault location → use u
         path = get_path_switches(u, j)
         Sij[(i, j)] = path
-
 
 # --------------------------
 # MODEL FUNCTION
@@ -62,8 +56,9 @@ def solve_case(allow_tie=True):
     # VARIABLES
     model.X = pyo.Var(model.S, domain=pyo.Binary)
     model.Cd = pyo.Var(model.I, model.J, domain=pyo.NonNegativeReals)
+    model.delta = pyo.Var(model.I, model.J, domain=pyo.Binary)
 
-    # Disable tie switches if needed
+    # Disable tie switches if Case 2
     if not allow_tie:
         for s in range(39, 52):
             model.X[s].fix(0)
@@ -80,13 +75,12 @@ def solve_case(allow_tie=True):
                 ecost += failure_rate[i] * m.Cd[i, j] * load[j] * repair_cost
 
         inv = sum(SWITCH_COST * m.X[s] for s in m.S)
-
         return ecost + inv
 
     model.obj = pyo.Objective(rule=obj_rule, sense=pyo.minimize)
 
     # --------------------------
-    # CONSTRAINTS (KEY PART)
+    # CONSTRAINTS
     # --------------------------
     model.cons = pyo.ConstraintList()
 
@@ -101,23 +95,31 @@ def solve_case(allow_tie=True):
             if len(switches) == 0:
                 continue
 
-            # switching possible
+            # δij only 1 if switch exists
             model.cons.add(
-                model.Cd[i, j] >= c_sw * sum(model.X[s] for s in switches)
+                model.delta[i, j] <= sum(model.X[s] for s in switches)
+            )
+
+            # switching case
+            model.cons.add(
+                model.Cd[i, j] >= c_sw * model.delta[i, j]
             )
 
             # repair case
             model.cons.add(
-                model.Cd[i, j] >= c_rep * (1 - sum(model.X[s] for s in switches))
+                model.Cd[i, j] >= c_rep * (1 - model.delta[i, j])
             )
 
-    # Optional: limit max switches (helps match paper)
-    model.cons.add(sum(model.X[s] for s in model.S) <= 51)
+    # CASE 2: no restoration allowed
+    if not allow_tie:
+        for i in model.I:
+            for j in model.J:
+                model.delta[i, j].fix(0)
 
     # --------------------------
     # SOLVE
     # --------------------------
-    solver = pyo.SolverFactory('glpk')
+    solver = pyo.SolverFactory('highs')   # IMPORTANT
     solver.solve(model)
 
     # --------------------------
