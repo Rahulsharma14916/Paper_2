@@ -99,8 +99,8 @@ def solve_case(with_tie=True):
 # --------------------------
 # RUN
 # --------------------------
-case1 = solve_case(True)
-case2 = solve_case(False)
+case1 = solve_case(False)
+case2 = solve_case(True)
 
 print("\nFINAL RESULTS")
 print("Case 1 (with tie):", len(case1))
